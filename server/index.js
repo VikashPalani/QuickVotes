@@ -1,167 +1,155 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-const cors = require("cors");
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
 
 const app = express();
-app.use(cors());
-
 const server = http.createServer(app);
 
-const io = new Server(server, {
-  cors: {
-    origin: "*", // Adjust in prod
-    methods: ["GET", "POST"],
-  },
+// Configure CORS for Socket.io and Express
+const io = socketIo(server, {
+    cors: {
+        origin: "http://localhost:5173", // Your frontend URL
+        methods: ["GET", "POST"],
+        credentials: true
+    }
+});
+
+app.use(cors({
+    origin: "http://localhost:5173", // Your frontend URL
+    credentials: true
+}));
+app.use(express.json());
+
+// Global state for the current poll
+let currentPoll = null; // { id: string, question: string, options: string[], duration: number, startTime: number, endTime: number }
+let studentAnswers = {}; // { studentId: { answer: string, timestamp: number, pollId: string } }
+let pollResults = {}; // { option: count, ... }
+let pollTimer = null; // Stores the setTimeout ID for the poll timer
+
+// Global state for chat messages
+let chatMessages = []; // { sender: string, message: string, timestamp: number }[]
+const MAX_CHAT_HISTORY = 50; // Limit chat history to prevent excessive memory usage
+
+io.on('connection', (socket) => {
+    console.log('New client connected:', socket.id);
+
+    // Send current poll state and chat history to newly connected client
+    if (currentPoll) {
+        const timeLeft = Math.max(0, currentPoll.endTime - Date.now());
+        socket.emit('currentPollState', {
+            poll: currentPoll,
+            results: pollResults,
+            timeLeft: timeLeft
+        });
+    } else {
+        socket.emit('waitingForPoll');
+    }
+    socket.emit('chatHistory', chatMessages); // Send existing chat history
+
+    // Event listener for teacher to create a new poll
+    socket.on('createPoll', (data) => {
+        // Clear any existing timer if a poll was already active
+        if (pollTimer) {
+            clearTimeout(pollTimer);
+            pollTimer = null;
+        }
+
+        // Reset poll state for the new poll
+        studentAnswers = {};
+        pollResults = {};
+
+        const pollId = Date.now().toString();
+        const startTime = Date.now();
+        // Use the duration provided by the teacher, default to 60 seconds if not provided or invalid
+        const durationSeconds = parseInt(data.duration, 10) || 60;
+        const endTime = startTime + durationSeconds * 1000;
+
+        currentPoll = {
+            id: pollId,
+            question: data.question,
+            options: data.options,
+            duration: durationSeconds, // Store the configured duration
+            startTime: startTime,
+            endTime: endTime
+        };
+
+        // Initialize poll results with 0 votes for each option
+        data.options.forEach(option => {
+            pollResults[option] = 0;
+        });
+
+        console.log('New poll created:', currentPoll);
+        io.emit('newPoll', { poll: currentPoll, results: pollResults });
+
+        // Start the poll timer
+        pollTimer = setTimeout(() => {
+            console.log('Poll timer ended for poll:', currentPoll.id);
+            io.emit('pollEnded', { pollId: currentPoll.id, results: pollResults });
+            currentPoll = null; // Mark poll as ended on the server
+            pollTimer = null;
+        }, durationSeconds * 1000);
+    });
+
+    // Event listener for student to submit an answer
+    socket.on('submitAnswer', (data) => {
+        const { pollId, answer, studentId } = data;
+
+        if (!currentPoll || currentPoll.id !== pollId) {
+            console.log('Attempted to answer an invalid or expired poll.');
+            return;
+        }
+
+        if (studentAnswers[studentId] && studentAnswers[studentId].pollId === pollId) {
+            console.log(`Student ${studentId} already answered this poll.`);
+            return;
+        }
+
+        if (currentPoll.options.includes(answer)) {
+            pollResults[answer]++;
+            studentAnswers[studentId] = { answer: answer, timestamp: Date.now(), pollId: pollId };
+            console.log(`Student ${studentId} answered: ${answer}. Current results:`, pollResults);
+            io.emit('pollUpdate', { pollId: currentPoll.id, results: pollResults });
+        } else {
+            console.log('Invalid answer option:', answer);
+        }
+    });
+
+    // Event listener for clients requesting the current poll state
+    socket.on('requestPollState', () => {
+        if (currentPoll) {
+            const timeLeft = Math.max(0, currentPoll.endTime - Date.now());
+            socket.emit('currentPollState', {
+                poll: currentPoll,
+                results: pollResults,
+                timeLeft: timeLeft
+            });
+        } else {
+            socket.emit('waitingForPoll');
+        }
+    });
+
+    // --- Chat Functionality ---
+    socket.on('sendMessage', (data) => {
+        const { sender, message } = data;
+        if (!sender || !message || message.trim() === '') {
+            console.log('Invalid chat message received.');
+            return;
+        }
+        const newMessage = { sender, message: message.trim(), timestamp: Date.now() };
+        chatMessages.push(newMessage);
+        // Keep chat history limited
+        if (chatMessages.length > MAX_CHAT_HISTORY) {
+            chatMessages = chatMessages.slice(chatMessages.length - MAX_CHAT_HISTORY);
+        }
+        console.log('New chat message:', newMessage);
+        io.emit('receiveMessage', newMessage); // Broadcast to all clients
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Client disconnected:', socket.id);
+    });
 });
 
 const PORT = process.env.PORT || 5000;
-
-// In-memory data (can replace with DB later)
-let currentPoll = null; // { question, options, correctOption, timeLimit, startedAt }
-let students = {}; // { socketId: { name, answered: false, answer: null } }
-let pollAnswers = {}; // { optionIndex: count }
-
-// Helper: Check if all students answered current poll
-const allAnswered = () => {
-  if (!currentPoll) return true;
-  return Object.values(students).every((s) => s.answered);
-};
-
-io.on("connection", (socket) => {
-  console.log(`New connection: ${socket.id}`);
-
-  // Student joins with name
-  socket.on("student_join", (name, callback) => {
-    if (!name) return callback({ success: false, message: "Name required" });
-
-    // Check if name is unique in current students
-    const nameExists = Object.values(students).some(
-      (s) => s.name === name
-    );
-    if (nameExists) {
-      return callback({ success: false, message: "Name already taken" });
-    }
-
-    students[socket.id] = { name, answered: false, answer: null };
-    callback({ success: true, currentPoll });
-
-    // Inform teacher and students of updated participants if needed
-    io.emit("students_update", Object.values(students).map(s => s.name));
-  });
-
-  // Teacher tries to create a new poll
-  socket.on("teacher_create_poll", (pollData, callback) => {
-    /*
-      pollData = {
-        question: string,
-        options: string[],
-        correctOption: number (index),
-        timeLimit: number (seconds)
-      }
-    */
-
-    if (currentPoll && !allAnswered()) {
-      return callback({
-        success: false,
-        message:
-          "Cannot create new poll until current poll is answered by all students",
-      });
-    }
-
-    // Reset poll answers
-    pollAnswers = {};
-    pollData.options.forEach((_, idx) => {
-      pollAnswers[idx] = 0;
-    });
-
-    // Save current poll and mark all students unanswered
-    currentPoll = {
-      ...pollData,
-      startedAt: Date.now(),
-    };
-    for (const s of Object.values(students)) {
-      s.answered = false;
-      s.answer = null;
-    }
-
-    io.emit("new_poll", currentPoll);
-    callback({ success: true });
-
-    // Setup timer to end poll automatically
-    setTimeout(() => {
-      io.emit("poll_ended", pollAnswers);
-      currentPoll = null;
-    }, pollData.timeLimit * 1000);
-  });
-
-  // Student submits answer
-  socket.on("student_answer", (optionIndex, callback) => {
-    if (!currentPoll) {
-      return callback({ success: false, message: "No active poll" });
-    }
-
-    const student = students[socket.id];
-    if (!student) {
-      return callback({ success: false, message: "Student not registered" });
-    }
-
-    if (student.answered) {
-      return callback({ success: false, message: "Already answered" });
-    }
-
-    // Register answer
-    student.answered = true;
-    student.answer = optionIndex;
-
-    pollAnswers[optionIndex] = (pollAnswers[optionIndex] || 0) + 1;
-
-    // Notify teacher and students of live results
-    io.emit("poll_update", pollAnswers);
-
-    callback({ success: true });
-
-    // If all answered early, end poll early
-    if (allAnswered()) {
-      io.emit("poll_ended", pollAnswers);
-      currentPoll = null;
-    }
-  });
-
-  // Teacher kicks a student (bonus)
-  socket.on("teacher_kick_student", (studentName, callback) => {
-    // Find student socketId by name
-    const entry = Object.entries(students).find(
-      ([id, s]) => s.name === studentName
-    );
-    if (!entry) return callback({ success: false, message: "Student not found" });
-
-    const [kickSocketId] = entry;
-    // Disconnect kicked student
-    io.to(kickSocketId).emit("kicked");
-    io.sockets.sockets.get(kickSocketId)?.disconnect(true);
-
-    delete students[kickSocketId];
-    io.emit("students_update", Object.values(students).map(s => s.name));
-
-    callback({ success: true });
-  });
-
-  // On disconnect cleanup
-  socket.on("disconnect", () => {
-    if (students[socket.id]) {
-      delete students[socket.id];
-      io.emit("students_update", Object.values(students).map(s => s.name));
-    }
-    console.log(`Disconnected: ${socket.id}`);
-  });
-});
-
-// Basic health check route
-app.get("/", (req, res) => {
-  res.send("Live Polling System Backend Running");
-});
-
-server.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

@@ -1,43 +1,53 @@
-import React from 'react'
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { socket } from "../utils/socket";
 
-const StudentEntry = () => {
-  const [name, setName] = useState(localStorage.getItem("studentName") || "");
-  const navigate = useNavigate();
+function StudentEntry() {
+  const [studentName, setStudentName] = useState(''); // State for the student's name
+  const navigate = useNavigate();                     // Hook for programmatic navigation
 
-  const join = () => {
-    if (!name) return alert("Please enter a name");
+  useEffect(() => {
+    // On component mount, check if student name already exists in sessionStorage
+    const storedName = sessionStorage.getItem('studentName');
+    if (storedName) {
+      setStudentName(storedName); // Pre-fill the input if name found
+      navigate('/student/poll');  // Redirect directly to poll page if name exists
+    }
+  }, [navigate]); // navigate is a dependency to ensure effect runs if navigate changes (though it's stable)
 
-    socket.emit("student_join", name, (res) => {
-      if (res.success) {
-        localStorage.setItem("studentName", name);
-        navigate("/student/poll");
-      } else {
-        alert(res.message);
-      }
-    });
+  const handleSubmit = (e) => {
+    e.preventDefault(); // Prevent default form submission
+    if (studentName.trim()) {
+      sessionStorage.setItem('studentName', studentName.trim()); // Store name in sessionStorage
+      navigate('/student/poll'); // Navigate to the student polling page
+    } else {
+      // Using alert for simple validation as per instructions, consider a custom modal in production
+      alert('Please enter your name.');
+    }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-blue-100">
-      <h2 className="text-3xl font-bold mb-6">Enter Your Name</h2>
-      <input
-        type="text"
-        className="p-3 border rounded mb-4 w-80"
-        placeholder="e.g. John"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
-      <button
-        onClick={join}
-        className="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700"
-      >
-        Join Poll
-      </button>
+    <div className="container p-5 text-center">
+      <h1 className="text-3xl font-bold mb-6 text-gray-800">Join as a Student</h1>
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="card bg-gray-50 p-6 rounded-lg shadow-sm">
+          <label htmlFor="studentName" className="block text-lg font-medium text-gray-700 mb-2">Your Name:</label>
+          <input
+            type="text"
+            id="studentName"
+            value={studentName}
+            onChange={(e) => setStudentName(e.target.value)}
+            placeholder="Enter your name"
+            required
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-lg"
+          />
+        </div>
+        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:-translate-y-1">
+          Join Poll
+        </button>
+      </form>
     </div>
   );
-};
+}
 
 export default StudentEntry;
