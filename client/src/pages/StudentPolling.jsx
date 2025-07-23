@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { socket } from "../utils/socket";
+import socket from "../utils/socket";
 import { useRef } from "react";
 
-import ChatPopup from '../components/ChatPopup'; // Import the ChatPopup component
+import ChatPopup from '../components/ChatPopup';
 
 function StudentPolling() {
   const [studentName, setStudentName] = useState('');
@@ -200,7 +200,6 @@ function StudentPolling() {
         </div>
       )}
 
-      {/* Chat Popup for Student */}
       <ChatPopup userRole="student" userName={studentName} />
     </div>
   );

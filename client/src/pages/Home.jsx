@@ -11,13 +11,11 @@ function Home() {
         Participate in real-time polls or host your own interactive sessions.
       </p>
       <div className="flex flex-col md:flex-row justify-center items-center gap-6 mt-10">
-        {/* Teacher Button */}
         <Link to="/teacher/create">
           <button className="w-64 py-4 px-8 bg-indigo-600 hover:bg-indigo-700 text-white text-xl font-semibold rounded-full shadow-lg transition-all duration-300 ease-in-out transform hover:scale-105 hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-indigo-300 active:bg-indigo-800 animate-slide-in-left">
             I'm a Teacher
           </button>
         </Link>
-        {/* Student Button */}
         <Link to="/student">
           <button className="w-64 py-4 px-8 bg-green-500 hover:bg-green-600 text-white text-xl font-semibold rounded-full shadow-lg transition-all duration-300 ease-in-out transform hover:scale-105 hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-green-300 active:bg-green-700 animate-slide-in-right">
             I'm a Student

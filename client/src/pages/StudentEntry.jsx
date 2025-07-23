@@ -1,27 +1,25 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { socket } from "../utils/socket";
+import socket from "../utils/socket";
 
 function StudentEntry() {
-  const [studentName, setStudentName] = useState(''); // State for the student's name
-  const navigate = useNavigate();                     // Hook for programmatic navigation
+  const [studentName, setStudentName] = useState('');
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // On component mount, check if student name already exists in sessionStorage
     const storedName = sessionStorage.getItem('studentName');
     if (storedName) {
-      setStudentName(storedName); // Pre-fill the input if name found
-      navigate('/student/poll');  // Redirect directly to poll page if name exists
+      setStudentName(storedName);
+      navigate('/student/poll');
     }
-  }, [navigate]); // navigate is a dependency to ensure effect runs if navigate changes (though it's stable)
+  }, [navigate]);
 
   const handleSubmit = (e) => {
-    e.preventDefault(); // Prevent default form submission
+    e.preventDefault();
     if (studentName.trim()) {
-      sessionStorage.setItem('studentName', studentName.trim()); // Store name in sessionStorage
-      navigate('/student/poll'); // Navigate to the student polling page
+      sessionStorage.setItem('studentName', studentName.trim());
+      navigate('/student/poll');
     } else {
-      // Using alert for simple validation as per instructions, consider a custom modal in production
       alert('Please enter your name.');
     }
   };
